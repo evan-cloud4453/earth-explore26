@@ -9,7 +9,10 @@
 
   // ---------- 문항 색인 ----------
   var QMAP = {};
-  DATA.topics.forEach(function (t) {
+  var SETS = {};
+  DATA.sets.forEach(function (st) { SETS[st.id] = st; });
+  DATA.topics.forEach(function (t, ti) {
+    t.order = ti;
     t.questions.forEach(function (q, i) {
       q.topic = t;
       q.no = i + 1;
@@ -17,6 +20,9 @@
     });
   });
   var TOTAL = Object.keys(QMAP).length;
+  function tag(q) { return SETS[q.topic.set].short + " " + q.topic.no + "-" + q.no; }
+  function setTopics(id) { return DATA.topics.filter(function (t) { return t.set === id; }); }
+  var curSet = DATA.sets[0].id;
 
   // ---------- 기록(브라우저 저장) ----------
   var store = load();
@@ -118,7 +124,7 @@
         '<svg class="globe" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="28" fill="var(--accent)"/>' +
         '<path d="M12 25c8-6 14 2 20-2s10-8 18-2M10 40c10 4 16-4 24 0s12 4 18 0" stroke="#91c48a" stroke-width="6" fill="none" stroke-linecap="round"/></svg>' +
         "<h1>지구탐사 퀴즈</h1>" +
-        "<p>중간고사 대비 · 6개 주제 " + TOTAL + "문항</p>" +
+        "<p>중간고사 대비 · 문제집 " + DATA.sets.length + "종 " + TOTAL + "문항</p>" +
       "</section>" +
       '<div class="stats">' +
         '<div class="card stat"><b>' + seen.length + "</b><span>푼 문항 / " + TOTAL + "</span></div>" +
@@ -140,7 +146,7 @@
   // =========================================================
   var shuffleOn = false;
   function topics() {
-    var cards = DATA.topics.map(function (t) {
+    var cards = setTopics(curSet).map(function (t) {
       var n = t.questions.length;
       var seen = t.questions.filter(function (q) { return store.seen[q.id]; }).length;
       var wrong = t.questions.filter(function (q) { var w = store.wrong[q.id]; return w && !w.resolved; }).length;
@@ -160,15 +166,21 @@
     }).join("");
     h(
       '<div class="topbar"><button class="icon-btn" id="back">← 메인</button><span class="title">주제 선택</span></div>' +
+      '<div class="settabs">' + DATA.sets.map(function (st) {
+        var n = setTopics(st.id).reduce(function (a, t) { return a + t.questions.length; }, 0);
+        return '<button class="settab' + (st.id === curSet ? " on" : "") + '" data-s="' + st.id + '"><b>' + esc(st.title) + "</b><span>" + n + "문항</span></button>";
+      }).join("") + "</div>" +
+      '<p class="setdesc">' + esc(SETS[curSet].desc) + "</p>" +
       '<label class="toggle"><input type="checkbox" id="shuf"' + (shuffleOn ? " checked" : "") + "> 문항 순서 섞기</label>" +
       '<div class="topics">' + cards + "</div>"
     );
     on("#back", "click", home);
     on("#shuf", "change", function (e) { shuffleOn = e.target.checked; });
+    on(".settab", "click", function () { curSet = this.dataset.s; topics(); });
     on(".topic", "click", function () {
       var t = DATA.topics.filter(function (x) { return x.id === this.dataset.t; }, this)[0];
       var list = shuffleOn ? shuffle(t.questions) : t.questions.slice();
-      startQuiz({ title: t.no + ". " + t.title, list: list, topicId: t.id });
+      startQuiz({ title: SETS[t.set].short + " · " + t.no + ". " + t.title, list: list, topicId: t.id });
     });
   }
 
@@ -202,7 +214,7 @@
       }).join("") + "</div>";
     }
     var needsSubmit = q.type === "multi" || q.type === "short";
-    var topicLine = S.topicId ? "" : '<span class="chip gray">' + esc(q.topic.no) + ". " + esc(q.topic.title) + "</span>";
+    var topicLine = S.topicId ? "" : '<span class="chip gray">' + esc(SETS[q.topic.set].short) + " " + esc(q.topic.no) + ". " + esc(q.topic.title) + "</span>";
     h(
       '<div class="topbar"><button class="icon-btn" id="quit">✕ 그만</button><span class="title">' + esc(S.title) + "</span>" +
         '<span class="small muted">' + S.score + "점</span></div>" +
@@ -358,7 +370,7 @@
       '<text x="70" y="78" text-anchor="middle" font-size="26" font-weight="800" fill="var(--ink)">' + pct + "%</text></svg>";
     var list = wrongs.map(function (r) {
       var q = QMAP[r.id];
-      return '<div class="card small"><span class="chip bad">' + esc(q.topic.no) + "-" + q.no + "</span> " + rich(q.stem) +
+      return '<div class="card small"><span class="chip bad">' + esc(tag(q)) + "</span> " + rich(q.stem) +
         '<div class="muted" style="margin-top:6px">정답 ' + esc(answerText(q)) + " · 내 답 " + esc(mineText(q, r.mine)) + "</div></div>";
     }).join("");
     h(
@@ -388,23 +400,31 @@
     var ids = Object.keys(store.wrong).filter(function (id) { return QMAP[id]; });
     var shown = ids.filter(function (id) {
       var q = QMAP[id], w = store.wrong[id];
-      return (filter === "all" || q.topic.id === filter) && (showResolved || !w.resolved);
+      var okf = filter === "all" || (filter.indexOf("s:") === 0 ? q.topic.set === filter.slice(2) : q.topic.id === filter);
+      return okf && (showResolved || !w.resolved);
     });
     shown.sort(function (a, b) {
       var qa = QMAP[a], qb = QMAP[b];
-      return qa.topic.id === qb.topic.id ? qa.no - qb.no : (qa.topic.id < qb.topic.id ? -1 : 1);
+      return qa.topic.id === qb.topic.id ? qa.no - qb.no : qa.topic.order - qb.topic.order;
     });
     var counts = { all: 0 };
     ids.forEach(function (id) {
       if (!showResolved && store.wrong[id].resolved) return;
       counts.all += 1;
       var t = QMAP[id].topic.id; counts[t] = (counts[t] || 0) + 1;
+      var sk = "s:" + QMAP[id].topic.set; counts[sk] = (counts[sk] || 0) + 1;
     });
+    var activeSet = filter === "all" ? null : (filter.indexOf("s:") === 0 ? filter.slice(2) : (DATA.topics.filter(function (t) { return t.id === filter; })[0] || {}).set);
     var filters = '<button class="filter' + (filter === "all" ? " on" : "") + '" data-f="all">전체 ' + counts.all + "</button>" +
-      DATA.topics.map(function (t) {
+      DATA.sets.map(function (st) {
+        return '<button class="filter' + (activeSet === st.id ? " on" : "") + '" data-f="s:' + st.id + '">' + esc(st.title) + " " + (counts["s:" + st.id] || 0) + "</button>";
+      }).join("");
+    if (activeSet) {
+      filters += '</div><div class="filters sub">' + setTopics(activeSet).map(function (t) {
         return '<button class="filter' + (filter === t.id ? " on" : "") + '" data-f="' + t.id + '">' + esc(t.no) + ". " +
           esc(t.title.split(" — ")[0]) + " " + (counts[t.id] || 0) + "</button>";
       }).join("");
+    }
     var cards = shown.map(function (id) {
       var q = QMAP[id], w = store.wrong[id];
       var status = w.resolved ? '<span class="chip ok">다시 맞힘</span>' : '<span class="chip bad">오답</span>';
@@ -421,7 +441,7 @@
       return (
         '<details class="card note">' +
           "<summary>" +
-            '<span class="ntop">' + status + '<span class="chip gray">' + esc(q.topic.no) + "-" + q.no + "</span>" +
+            '<span class="ntop">' + status + '<span class="chip gray">' + esc(tag(q)) + "</span>" +
             '<span class="chip gray">' + TYPE[q.type] + "</span>" +
             "<span>틀린 횟수 " + w.count + (w.fixed ? " · 다시 맞힘 " + w.fixed : "") + " · " + fmtDate(w.at) + "</span></span>" +
             '<span class="nstem">' + rich(q.stem) + "</span>" +
